@@ -15,6 +15,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  BackHandler,
 } from 'react-native';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,14 +28,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [appReady, setAppReady] = useState(false);
 
-  // 🍳 MODO COZINHA PRO
   const [modoCozinha, setModoCozinha] = useState(false);
   const [passos, setPassos] = useState<string[]>([]);
   const [passoAtual, setPassoAtual] = useState(0);
-  const [vozAtiva, setVozAtiva] = useState(false);
+  const [vozAtiva, setVozAtiva] = useState(true);
+  const podeEntrarModoCozinha = !loading && passos.length > 0;
 
-  const autoPlay = true; // 🔥 automático ON
-  const tempoPasso = 6; // segundos por passo
+  const tempoPasso = 6;
 
   const api = axios.create({
     baseURL: "https://api.groq.com/openai/v1/chat/completions",
@@ -44,33 +44,68 @@ export default function App() {
     }
   });
 
+ useEffect(() => {
+  const backAction = () => {
+    if (modoCozinha) {
+      setModoCozinha(false);
+      setPassoAtual(0);
+      setPassos([]);
+      return true; // ❗ impede fechar o app
+    }
+    return false; // deixa o Android sair normalmente da tela/app
+  };
+
+  const subscription = BackHandler.addEventListener(
+    'hardwareBackPress',
+    backAction
+  );
+
+  return () => subscription.remove();
+}, [modoCozinha]);
+
   useEffect(() => {
-    const prepareApp = async () => {
-      await new Promise(r => setTimeout(r, 1500));
-      setAppReady(true);
-    };
-    prepareApp();
+    setTimeout(() => setAppReady(true), 1500);
   }, []);
 
   function extrairPassos(texto: string) {
     const regex = /\d+\.\s(.+)/g;
-    const encontrados = [...texto.matchAll(regex)];
-    return encontrados.map(i => i[1]);
+    return [...texto.matchAll(regex)].map(i => i[1]);
   }
 
-  function falar(texto: string) {
-    Speech.stop();
-    Speech.speak(texto, {
+function falarSiri(texto: string) {
+  Speech.stop();
+
+  // quebra frases para parecer humano
+  const frases = texto
+    .replace(/,/g, ', ...')
+    .replace(/\./g, '. ...')
+    .split('...');
+
+  let i = 0;
+
+  const falarProxima = () => {
+    if (i >= frases.length) return;
+
+    const frase = frases[i].trim();
+
+    Speech.speak(frase, {
       language: 'pt-BR',
-      rate: 2,
-      pitch: 1,
+      rate: 0.88,
+      pitch: 1.12,
+      onDone: () => {
+        i++;
+        setTimeout(falarProxima, 250); // pausa estilo humano
+      },
     });
-  }
+  };
+
+  falarProxima();
+}
 
   async function gerarReceita() {
-    try {
-      setLoading(true);
+    setLoading(true);
 
+    try {
       const resposta = await api.post('', {
         model: "llama-3.1-8b-instant",
         max_tokens: 1024,
@@ -78,13 +113,54 @@ export default function App() {
         messages: [
           {
             role: "system",
-            content: `Você é um chef. Sempre use passos numerados no preparo.`
+            content: `
+        Você é um personal chef de cozinha criativo, carismático e especialista em ajudar pessoas criando receitas deliciosas com base nos ingredientes fornecidos.
+
+        Sua missão é gerar receitas com uma apresentação BONITA, MODERNA e ENVOLVENTE, proporcionando uma experiência divertida e agradável para o usuário.
+
+        REGRAS IMPORTANTES:
+        - Sempre use emojis relacionados ao prato.
+        - O nome do prato deve conter um emoji correspondente à receita.
+        - Organize a resposta de forma visualmente bonita.
+        - Use linguagem amigável e apetitosa.
+        - As instruções devem ser claras e fáceis de seguir.
+        - Faça o usuário sentir vontade de cozinhar.
+        - Nunca use markdown com **.
+        - Use espaçamento entre as seções.
+
+        FORMATO OBRIGATÓRIO DA RESPOSTA:
+
+        🍽️ NOME DO PRATO:
+        [Emoji + Nome criativo da receita]
+
+        🛒 INGREDIENTES:
+        • Ingrediente 1
+        • Ingrediente 2
+        • Ingrediente 3
+
+        👨‍🍳 MODO DE PREPARO:
+        1. Passo 1
+        2. Passo 2
+        3. Passo 3
+
+        ✨ SUGESTÕES DE APRESENTAÇÃO:
+        • Sugestão 1
+        • Sugestão 2
+        • Sugestão 3
+
+        💡 DICA DO CHEF:
+        [Uma dica útil, criativa ou saborosa sobre o prato]
+
+        REGRAS EXTRAS:
+        - Se a receita for doce, use emojis fofos e divertidos.
+        - Se for fitness, use emojis saudáveis.
+        - Se for bebida, use emojis de copos/frutas.
+        - Se for comida brasileira, deixe o texto mais acolhedor.
+        - Crie nomes criativos para as receitas.
+        - A resposta deve parecer de um aplicativo premium de culinária.
+        `
           },
-          {
-            role: "user",
-            content: `Ingredientes: ${ingredientes}`
-          }
-        ],
+        ]
       });
 
       let texto = resposta.data.choices[0].message.content;
@@ -114,31 +190,36 @@ export default function App() {
   useEffect(() => {
     if (modoCozinha && vozAtiva && passos[passoAtual]) {
       Speech.stop();
-      setTimeout(() => {
-        falar(passos[passoAtual]);
-      }, 200);
+      falarSiri(passos[passoAtual]);
     }
-  }, [passoAtual, modoCozinha, vozAtiva]);
+  }, [passoAtual]);
 
-  // ⚡ AUTO NEXT + VIBRAÇÃO
+  // ⏱ AUTO NEXT
   useEffect(() => {
-    if (!modoCozinha || !passos.length) return;
+  if (!modoCozinha || !vozAtiva) return;
+  if (!passos[passoAtual]) return;
 
-    const timer = setTimeout(() => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  Speech.stop();
 
+  // fala o passo atual
+  Speech.speak(passos[passoAtual], {
+    language: 'pt-BR',
+    rate: 1,
+    onDone: () => {
+      // 🔥 quando terminar de falar → vai pro próximo
       setPassoAtual(prev => {
-        if (prev < passos.length - 1) {
-          return prev + 1;
-        } else {
-          setModoCozinha(false);
-          return prev;
-        }
-      });
-    }, tempoPasso * 1000);
+        if (prev < passos.length - 1) return prev + 1;
 
-    return () => clearTimeout(timer);
-  }, [passoAtual, modoCozinha]);
+        setModoCozinha(false);
+        return prev;
+      });
+    },
+  });
+
+  return () => {
+    Speech.stop();
+  };
+}, [passoAtual, modoCozinha, vozAtiva]);
 
   if (!appReady) {
     return (
@@ -159,24 +240,20 @@ export default function App() {
       <View style={styles.cozinhaContainer}>
 
         <Text style={styles.cozinhaTitulo}>
-          🍳 {passoAtual + 1} / {passos.length}
+          🍳 {passoAtual + 1} / {passos.length || 1}
         </Text>
 
-        {/* PROGRESSO */}
         <View style={styles.progressBar}>
           <View
             style={{
-              width: `${((passoAtual + 1) / passos.length) * 100}%`,
+              width: `${passos.length ? ((passoAtual + 1) / passos.length) * 100 : 0}%`,
               height: 6,
               backgroundColor: '#48C748',
-              borderRadius: 10,
             }}
           />
         </View>
 
-        <Text style={styles.cozinhaPasso}>
-          {passo}
-        </Text>
+        <Text style={styles.cozinhaPasso}>{passo}</Text>
 
         <TouchableOpacity onPress={() => setVozAtiva(!vozAtiva)}>
           <Text style={{ color: '#48C748', marginBottom: 20 }}>
@@ -186,9 +263,13 @@ export default function App() {
 
         <View style={styles.cozinhaBotoes}>
 
+          {/* ⬅ VOLTAR PRA HOME (CORRIGIDO) */}
           <TouchableOpacity
-            disabled={passoAtual === 0}
-            onPress={() => setPassoAtual(passoAtual - 1)}
+            onPress={() => {
+              setModoCozinha(false);
+              setPassoAtual(0);
+              setPassos([]);
+            }}
           >
             <Text style={styles.navBtn}>⬅️</Text>
           </TouchableOpacity>
@@ -213,7 +294,7 @@ export default function App() {
     );
   }
 
-  // 🌙 HOME
+  // 🌙 HOME (SEU DESIGN ORIGINAL MANTIDO)
   return (
     <LinearGradient colors={['#0b0f1a', '#070d2a', '#0d092e']} style={{ flex: 1 }}>
 
@@ -225,21 +306,34 @@ export default function App() {
 
             <StatusBar barStyle="light-content" />
 
-            <Text style={styles.title}>👩‍🍳 Chef IA</Text>
+            <View style={styles.header}>
+              <Text style={styles.emoji}>👩‍🍳</Text>
+              <Text style={styles.title}>Chef IA By Jaqueline Moura</Text>
+              <Text style={styles.subtitle}>
+                Digite os ingredientes que você tem e receba receitas personalizadas!
+              </Text>
+            </View>
 
             <TextInput
               style={styles.input}
-              placeholder="ingredientes..."
+              placeholder="Ex: arroz, frango..."
               placeholderTextColor="#888"
               value={ingredientes}
               onChangeText={setIngredientes}
               multiline
             />
 
-            <TouchableOpacity style={styles.button} onPress={gerarReceita}>
-              <Text style={styles.buttonText}>
-                {loading ? "Gerando..." : "Gerar Receita"}
-              </Text>
+            <TouchableOpacity
+                style={[
+                  styles.button,
+                  loading && { opacity: 0.5 }
+                ]}
+                onPress={gerarReceita}
+                disabled={loading}
+              >
+                <Text style={styles.buttonText}>
+                  {loading ? "Gerando..." : "Gerar Receita"}
+                </Text>
             </TouchableOpacity>
 
             {receita ? (
@@ -248,17 +342,21 @@ export default function App() {
                   <Text style={styles.receita}>{receita}</Text>
                 </ScrollView>
 
-                <TouchableOpacity
-                  style={styles.modoButton}
-                  onPress={() => {
-                    setModoCozinha(true);
-                    setPassoAtual(0);
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>
-                    🍳 Modo Cozinha PRO
-                  </Text>
-                </TouchableOpacity>
+              <TouchableOpacity
+                disabled={!podeEntrarModoCozinha}
+                style={[
+                  styles.modoButton,
+                  (!podeEntrarModoCozinha || loading) && { opacity: 0.4 }
+                ]}
+                onPress={() => {
+                  setModoCozinha(true);
+                  setPassoAtual(0);
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                  🍳 Modo Cozinha
+                </Text>
+              </TouchableOpacity>
               </>
             ) : (
               <Text style={{ color: '#aaa', textAlign: 'center', marginTop: 50 }}>
@@ -277,46 +375,93 @@ export default function App() {
 
 const styles = StyleSheet.create({
 
-  container: { flex: 1, padding: 20, paddingTop: 60 },
+  container: {
+    flex: 1,
+    padding: 20,
+    paddingTop: 60,
+  },
 
-  title: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 20 },
+  // 🧑‍🍳 HEADER (voltou como você queria)
+  header: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
 
+  emoji: {
+    fontSize: 60,
+    marginBottom: 10,
+  },
+
+  title: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+
+  subtitle: {
+    color: '#ccc',
+    textAlign: 'center',
+    marginTop: 8,
+    fontSize: 14,
+  },
+
+  // 🧾 INPUT
   input: {
     backgroundColor: '#2d2d44',
     color: '#fff',
     padding: 15,
-    borderRadius: 10,
-    minHeight: 100,
-    marginBottom: 20,
+    borderRadius: 12,
+    minHeight: 58,
+    marginTop: 20,
   },
 
+  // 🍳 BOTÃO PRINCIPAL
   button: {
     backgroundColor: '#48C748',
     padding: 15,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
+    marginTop: 15,
   },
 
-  buttonText: { color: '#fff', fontWeight: 'bold' },
+  buttonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 
+  // 📜 RECEITA
   receitaContainer: {
     marginTop: 20,
     backgroundColor: '#2d2d44',
     padding: 15,
-    borderRadius: 10,
-    maxHeight: 250,
+    borderRadius: 12,
+    maxHeight: 260,
   },
 
-  receita: { color: '#fff' },
+  receita: {
+    color: '#fff',
+    lineHeight: 22,
+  },
 
+  // 🍳 BOTÃO MODO COZINHA
   modoButton: {
-    marginTop: 10,
+    marginTop: 12,
     backgroundColor: '#ff7b00',
     padding: 15,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
   },
 
+  // 💤 PLACEHOLDER
+  placeholder: {
+    color: '#aaa',
+    textAlign: 'center',
+    marginTop: 50,
+  },
+
+  // 🍳 MODO COZINHA
   cozinhaContainer: {
     flex: 1,
     backgroundColor: '#0b0f1a',
@@ -328,34 +473,39 @@ const styles = StyleSheet.create({
   cozinhaTitulo: {
     color: '#aaa',
     fontSize: 18,
-    marginBottom: 10,
+    marginBottom: 15,
   },
 
   cozinhaPasso: {
     color: '#fff',
-    fontSize: 30,
+    fontSize: 26,
     textAlign: 'center',
     marginVertical: 30,
+    paddingHorizontal: 10,
   },
 
-  cozinhaBotoes: {
-    flexDirection: 'row',
-    gap: 40,
-  },
-
-  navBtn: {
-    color: '#48C748',
-    fontSize: 32,
-    marginHorizontal: 20,
-  },
-
+  // 📊 PROGRESS BAR
   progressBar: {
     width: '100%',
     height: 6,
     backgroundColor: '#222',
     borderRadius: 10,
-    marginBottom: 20,
     overflow: 'hidden',
-  }
+    marginBottom: 25,
+  },
+
+  // ⬅️➡️ BOTÕES
+  cozinhaBotoes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 40,
+    marginTop: 20,
+  },
+
+  navBtn: {
+    color: '#48C748',
+    fontSize: 34,
+    marginHorizontal: 25,
+  },
 
 });
