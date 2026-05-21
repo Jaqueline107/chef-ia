@@ -131,7 +131,6 @@ function falarSiri(texto: string) {
         FORMATO OBRIGATÓRIO DA RESPOSTA:
 
         🍽️ NOME DO PRATO:
-        [Emoji + Nome criativo da receita]
 
         🛒 INGREDIENTES:
         • Ingrediente 1
