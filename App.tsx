@@ -359,9 +359,10 @@ function falarSiri(texto: string) {
               </TouchableOpacity>
               </>
             ) : (
-              <Text style={{ color: '#aaa', textAlign: 'center', marginTop: 50 }}>
-                Nenhuma receita ainda
-              </Text>
+              <View style={styles.placeholderContainer}> 
+              <Text style={styles.placeholderEmoji}>🥑</Text> 
+              <Text style={styles.placeholderText}>Nenhuma receita gerada ainda.</Text> 
+              </View>
             )}
 
           </View>
@@ -507,5 +508,5 @@ const styles = StyleSheet.create({
     fontSize: 34,
     marginHorizontal: 25,
   },
-
+  placeholderContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', }, placeholderEmoji: { fontSize: 60, marginBottom: 15, }, placeholderText: { color: '#ccc', fontSize: 16, textAlign: 'center', },
 });
